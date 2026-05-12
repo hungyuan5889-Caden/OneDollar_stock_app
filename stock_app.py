@@ -57,23 +57,39 @@ if st.session_state.searched and stock_symbol:
 
         error_msg = ""
 
-        # 優先使用 twstock 獲取台股數據
+        # 優先使用台灣證券交易所 API 獲取台股數據
         if market == "TW":
             try:
-                stock = twstock.Stock(symbol_input)
-                # 取得最新價格
-                stock.fetch_from_today()
-                if stock.price:
-                    current_price = float(stock.price[-1])
-                # 取得歷史最高價
-                stock.fetch_31()
-                if stock.data:
-                    historical_high = float(max([d.high for d in stock.data]))
-                    success_symbol = f"{symbol_input}.TW"
+                # 使用 TAIEX API 獲取即時報價
+                url = f"https://www.twse.com.tw/rwd/zh/fund/T86?date=&stockNo={symbol_input}&response=json"
+                resp = requests.get(url, headers=http_headers, timeout=10)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get('data'):
+                        # 取得最新價格
+                        latest = data['data'][0]
+                        current_price = float(latest[-5].replace(',', ''))  # 收盤價
+                        # 嘗試取得歷史資料來計算歷史最高
+                        hist_url = f"https://www.twse.com.tw/rwd/zh/fund/T86?date=20240101&stockNo={symbol_input}&response=json"
+                        hist_resp = requests.get(hist_url, headers=http_headers, timeout=10)
+                        if hist_resp.status_code == 200:
+                            hist_data = hist_resp.json()
+                            if hist_data.get('data'):
+                                highs = [float(d[-3].replace(',', '')) for d in hist_data['data'] if d[-3] != '--']
+                                if highs:
+                                    historical_high = max(highs)
+                        success_symbol = f"{symbol_input}.TW"
             except Exception as e:
                 error_msg = str(e)
-                # 如果 twstock 失敗，改用 yfinance
-                pass
+                # 如果台灣證交所 API 失敗，改用 twstock
+                try:
+                    stock = twstock.Stock(symbol_input)
+                    stock.fetch_from_today()
+                    if stock.price:
+                        current_price = float(stock.price[-1])
+                        success_symbol = f"{symbol_input}.TW"
+                except:
+                    pass
 
         # 如果台股使用 twstock 失敗，或是非台股，使用 yfinance
         if not success_symbol:
