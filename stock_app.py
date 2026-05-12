@@ -1,5 +1,6 @@
 import streamlit as st
 import yfinance as yf
+import twstock
 from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
@@ -55,39 +56,60 @@ if st.session_state.searched and stock_symbol:
         stock_info = None
 
         error_msg = ""
-        for sym in symbols_to_try:
+
+        # 優先使用 twstock 獲取台股數據
+        if market == "TW":
             try:
-                # 隨機延遲避免被限流
-                time.sleep(random.uniform(0.5, 1.5))
-
-                stock = yf.Ticker(sym)
-                # 設定代理或使用更保守的請求
-                stock_info = stock.info
-
-                if not stock_info:
-                    # 如果 info 為空，嘗試從歷史資料獲取
-                    hist = stock.history(period="5d")
-                    if not hist.empty:
-                        current_price = float(hist['Close'].iloc[-1])
-                else:
-                    current_price = stock_info.get('currentPrice') or stock_info.get('regularMarketPrice')
-
-                if current_price is None:
-                    hist = stock.history(period="5d")
-                    if not hist.empty:
-                        current_price = float(hist['Close'].iloc[-1])
-
-                if current_price is not None:
-                    hist_data = stock.history(period="max")
-                    if not hist_data.empty:
-                        historical_high = float(hist_data['High'].max())
-                    else:
-                        historical_high = current_price
-                    success_symbol = sym
-                    break
+                stock = twstock.Stock(symbol_input)
+                # 取得最新價格
+                stock.fetch_from_today()
+                if stock.price:
+                    current_price = float(stock.price[-1])
+                # 取得歷史最高價
+                stock.fetch_31()
+                if stock.data:
+                    historical_high = float(max([d.high for d in stock.data]))
+                    success_symbol = f"{symbol_input}.TW"
             except Exception as e:
                 error_msg = str(e)
-                continue
+                # 如果 twstock 失敗，改用 yfinance
+                pass
+
+        # 如果台股使用 twstock 失敗，或是非台股，使用 yfinance
+        if not success_symbol:
+            for sym in symbols_to_try:
+                try:
+                    # 隨機延遲避免被限流
+                    time.sleep(random.uniform(0.5, 1.5))
+
+                    stock = yf.Ticker(sym)
+                    # 設定代理或使用更保守的請求
+                    stock_info = stock.info
+
+                    if not stock_info:
+                        # 如果 info 為空，嘗試從歷史資料獲取
+                        hist = stock.history(period="5d")
+                        if not hist.empty:
+                            current_price = float(hist['Close'].iloc[-1])
+                    else:
+                        current_price = stock_info.get('currentPrice') or stock_info.get('regularMarketPrice')
+
+                    if current_price is None:
+                        hist = stock.history(period="5d")
+                        if not hist.empty:
+                            current_price = float(hist['Close'].iloc[-1])
+
+                    if current_price is not None:
+                        hist_data = stock.history(period="max")
+                        if not hist_data.empty:
+                            historical_high = float(hist_data['High'].max())
+                        else:
+                            historical_high = current_price
+                        success_symbol = sym
+                        break
+                except Exception as e:
+                    error_msg = str(e)
+                    continue
 
         if current_price is None:
             st.session_state.searched = False  # 重置搜尋狀態
