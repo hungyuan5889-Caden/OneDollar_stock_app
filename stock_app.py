@@ -91,12 +91,12 @@ if st.session_state.searched and stock_symbol:
                 except:
                     pass
 
-        # 如果台股使用 twstock 失敗，或是非台股，使用 yfinance
-        if not success_symbol:
+        # 如果台股失敗，嘗試用 yfinance (可能會被 rate limit)
+        if not success_symbol and market == "US":
             for sym in symbols_to_try:
                 try:
-                    # 隨機延遲避免被限流
-                    time.sleep(random.uniform(0.5, 1.5))
+                    # 延遲避免被限流
+                    time.sleep(2)
 
                     stock = yf.Ticker(sym)
                     # 設定代理或使用更保守的請求
