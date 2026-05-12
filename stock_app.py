@@ -6,6 +6,8 @@ import requests
 from bs4 import BeautifulSoup
 import time
 import random
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 設置 HTTP Headers 來減少被封鎖
 http_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -62,7 +64,7 @@ if st.session_state.searched and stock_symbol:
             try:
                 # 使用 TAIEX API 獲取即時報價
                 url = f"https://www.twse.com.tw/rwd/zh/fund/T86?date=&stockNo={symbol_input}&response=json"
-                resp = requests.get(url, headers=http_headers, timeout=10)
+                resp = requests.get(url, headers=http_headers, timeout=10, verify=False)
                 if resp.status_code == 200:
                     data = resp.json()
                     if data.get('data'):
@@ -71,7 +73,7 @@ if st.session_state.searched and stock_symbol:
                         current_price = float(latest[-5].replace(',', ''))  # 收盤價
                         # 嘗試取得歷史資料來計算歷史最高
                         hist_url = f"https://www.twse.com.tw/rwd/zh/fund/T86?date=20240101&stockNo={symbol_input}&response=json"
-                        hist_resp = requests.get(hist_url, headers=http_headers, timeout=10)
+                        hist_resp = requests.get(hist_url, headers=http_headers, timeout=10, verify=False)
                         if hist_resp.status_code == 200:
                             hist_data = hist_resp.json()
                             if hist_data.get('data'):
@@ -164,7 +166,7 @@ if st.session_state.searched and stock_symbol:
             if market == "TW" and not net_value:
                 try:
                     url = f"https://www.wantgoo.com/stock/{stock_symbol}"
-                    resp = requests.get(url, headers=http_headers, timeout=5)
+                    resp = requests.get(url, headers=http_headers, timeout=5, verify=False)
                     if resp.status_code == 200:
                         soup = BeautifulSoup(resp.text, 'html.parser')
                         nav_elem = soup.find(string='每股淨值')
