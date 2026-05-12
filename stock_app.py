@@ -89,6 +89,12 @@ if st.session_state.searched and stock_symbol:
                     stock.fetch_from_today()
                     if stock.price:
                         current_price = float(stock.price[-1])
+                        # 取得歷史最高
+                        stock.fetch_31()
+                        if stock.data:
+                            historical_high = max([d.high for d in stock.data])
+                        else:
+                            historical_high = current_price
                         success_symbol = f"{symbol_input}.TW"
                 except:
                     pass
@@ -129,6 +135,10 @@ if st.session_state.searched and stock_symbol:
                     error_msg = str(e)
                     continue
 
+        # 確保有歷史最高價
+        if historical_high is None and current_price is not None:
+            historical_high = current_price
+
         if current_price is None:
             st.session_state.searched = False  # 重置搜尋狀態
             st.error(f"無法獲取「{stock_symbol}」的股票資料")
@@ -139,6 +149,10 @@ if st.session_state.searched and stock_symbol:
             else:
                 st.info("提示：請確認股票代號正確，如 2330、AAPL、MSFT 等")
         else:
+            # 確保 historical_high 有值
+            if historical_high is None:
+                historical_high = current_price
+
             # 判斷基準價
             if historical_high > current_price:
                 p_base = historical_high
@@ -148,7 +162,7 @@ if st.session_state.searched and stock_symbol:
                 base_type = "目前成交價"
 
             # 計算回撤百分比
-            if historical_high > 0:
+            if historical_high and historical_high > 0:
                 drawdown_pct = ((historical_high - current_price) / historical_high) * 100
             else:
                 drawdown_pct = 0
