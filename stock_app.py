@@ -21,6 +21,10 @@ if 'historical_high' not in st.session_state:
     st.session_state.historical_high = None
 if 'success_symbol' not in st.session_state:
     st.session_state.success_symbol = None
+if 'is_etf' not in st.session_state:
+    st.session_state.is_etf = False
+if 'net_value' not in st.session_state:
+    st.session_state.net_value = None
 
 # ===== 1. 股票數據查詢 =====
 st.header("1. 股票數據查詢")
@@ -48,30 +52,33 @@ if search_btn:
         # ===== 台股 =====
         if market == "TW":
             if symbol_input.endswith((".TW", ".TWO")):
-                query_symbol = symbol_input
+                symbols_to_try = [symbol_input]
             else:
-                query_symbol = symbol_input
+                symbols_to_try = [f"{symbol_input}.TW", f"{symbol_input}.TWO"]
 
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{query_symbol}.TW"
-            payload = {'interval': '1d', 'range': '1y'}
-            resp = requests.get(url, headers=http_headers, params=payload, timeout=10, verify=False)
+            for test_sym in symbols_to_try:
+                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{test_sym}"
+                payload = {'interval': '1d', 'range': '1y'}
+                resp = requests.get(url, headers=http_headers, params=payload, timeout=10, verify=False)
 
-            if resp.status_code == 200:
-                data = resp.json()
-                if 'chart' in data and data['chart'].get('result'):
-                    result = data['chart']['result'][0]
-                    closes = result.get('indicators', {}).get('quote', [{}])[0].get('close', [])
-                    highs = result.get('indicators', {}).get('quote', [{}])[0].get('high', [])
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if 'chart' in data and data['chart'].get('result'):
+                        result = data['chart']['result'][0]
+                        closes = result.get('indicators', {}).get('quote', [{}])[0].get('close', [])
+                        highs = result.get('indicators', {}).get('quote', [{}])[0].get('high', [])
 
-                    valid_closes = [c for c in closes if c is not None]
-                    valid_highs = [h for h in highs if h is not None]
+                        valid_closes = [c for c in closes if c is not None]
+                        valid_highs = [h for h in highs if h is not None]
 
-                    if valid_closes:
-                        current_price = float(valid_closes[-1])
-                    if valid_highs:
-                        historical_high = float(max(valid_highs))
-                    if current_price:
-                        success_symbol = f"{query_symbol}.TW"
+                        if valid_closes:
+                            current_price = float(valid_closes[-1])
+                        if valid_highs:
+                            historical_high = float(max(valid_highs))
+                        if current_price:
+                            success_symbol = test_sym
+                            break
+
 
         # ===== 美股 =====
         elif market == "US":
@@ -105,9 +112,33 @@ if search_btn:
     if current_price:
         if historical_high is None:
             historical_high = current_price
+
+        # 偵測是否為 ETF
+        is_etf = False
+        net_value = None
+        if market == "TW":
+            # 台股 ETF 代碼開頭通常是 00 或 0
+            if symbol_input.startswith('0'):
+                is_etf = True
+                # 嘗試從 Yahoo 獲取 ETF 淨值
+                nav_url = f"https://www.twse.com.tw/rwd/zh/fund/T86?date=&stockNo={symbol_input}&response=json"
+                nav_resp = requests.get(nav_url, headers=http_headers, timeout=10, verify=False)
+                if nav_resp.status_code == 200:
+                    try:
+                        nav_data = nav_resp.json()
+                        if nav_data.get('data') and nav_data['data'][0]:
+                            nav = nav_data['data'][0]
+                            nav_str = nav[3] if nav[3] != '--' else None
+                            if nav_str:
+                                net_value = float(nav_str.replace(',', ''))
+                    except:
+                        pass
+
         st.session_state.current_price = current_price
         st.session_state.historical_high = historical_high
         st.session_state.success_symbol = success_symbol
+        st.session_state.is_etf = is_etf
+        st.session_state.net_value = net_value
         st.rerun()
     else:
         st.error(f"無法獲取「{stock_symbol}」的股票資料")
@@ -118,6 +149,8 @@ if st.session_state.current_price is not None:
     current_price = st.session_state.current_price
     historical_high = st.session_state.historical_high
     success_symbol = st.session_state.success_symbol
+    is_etf = st.session_state.is_etf
+    net_value = st.session_state.net_value
 
     # 判斷基準價
     if historical_high > current_price:
@@ -130,7 +163,7 @@ if st.session_state.current_price is not None:
     # 計算回撤百分比
     drawdown_pct = ((historical_high - current_price) / historical_high) * 100
 
-    st.success(f"✅ 查詢成功: {success_symbol}")
+    st.success(f"✅ 查詢成功: {success_symbol}" + (" (ETF)" if is_etf else ""))
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -141,6 +174,12 @@ if st.session_state.current_price is not None:
         st.metric("距歷史最高點回撤", f"{drawdown_pct:.2f}%", delta_color="inverse")
     with col4:
         st.metric("基準價 (P_base)", f"${p_base:,.2f}", delta=base_type)
+
+    if is_etf:
+        if net_value:
+            st.metric("ETF 每股淨值", f"${net_value:,.2f}")
+        else:
+            st.info("ETF 資訊：無淨值數據")
 
     # ===== 2. 自定義回撤計算 =====
     st.divider()
