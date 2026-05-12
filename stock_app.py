@@ -63,15 +63,14 @@ if st.session_state.searched and stock_symbol:
         if market == "TW":
             try:
                 stock_tw = twstock.Stock(symbol_input)
-                stock_tw.fetch_from_today()
-                if stock_tw.price:
-                    current_price = float(stock_tw.price[-1])
-                    stock_tw.fetch_all()
-                    if stock_tw.data:
-                        historical_high = float(max([d.high for d in stock_tw.data]))
-                    else:
-                        historical_high = current_price
-                    success_symbol = f"{symbol_input}.TW"
+                stock_tw.fetch()
+                if stock_tw.data:
+                    latest = stock_tw.data[-1]
+                    current_price = float(latest.close)
+                    historical_high = float(max([d.high for d in stock_tw.data]))
+                else:
+                    current_price = None
+                success_symbol = f"{symbol_input}.TW"
             except Exception as e:
                 error_msg = str(e)
 
