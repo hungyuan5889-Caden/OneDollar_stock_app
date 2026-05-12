@@ -65,6 +65,7 @@ if search_btn:
                     data = resp.json()
                     if 'chart' in data and data['chart'].get('result'):
                         result = data['chart']['result'][0]
+                        meta = result.get('meta', {})
                         closes = result.get('indicators', {}).get('quote', [{}])[0].get('close', [])
                         highs = result.get('indicators', {}).get('quote', [{}])[0].get('high', [])
 
@@ -78,6 +79,20 @@ if search_btn:
                         if current_price:
                             success_symbol = test_sym
                             break
+
+        # ETF 淨值：從 Yahoo Finance QuoteSummary API 獲取
+        if market == "TW" and success_symbol and symbol_input.startswith('0'):
+            quote_url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{success_symbol}"
+            quote_params = {
+                'modules': 'price',
+                'corsDomain': 'finance.yahoo.com'
+            }
+            quote_resp = requests.get(quote_url, headers=http_headers, params=quote_params, timeout=10, verify=False)
+            if quote_resp.status_code == 200:
+                quote_data = quote_resp.json()
+                price = quote_data.get('quoteSummary', {}).get('result', [{}])[0].get('price', {})
+                if price.get('navPrice', {}).get('raw'):
+                    st.session_state.net_value = float(price['navPrice']['raw'])
 
 
         # ===== 美股 =====
@@ -113,29 +128,13 @@ if search_btn:
         if historical_high is None:
             historical_high = current_price
 
-        # 偵測是否為 ETF，從 Yahoo meta 取得 NAV
-        is_etf = False
-        net_value = None
-        if market == "TW" and symbol_input.startswith('0'):
-            is_etf = True
-            # 從 Yahoo Finance v8 API 的 meta 欄位取得 navPrice
-            nav_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{success_symbol}"
-            nav_resp = requests.get(nav_url, headers=http_headers, timeout=10, verify=False)
-            if nav_resp.status_code == 200:
-                try:
-                    nav_data = nav_resp.json()
-                    meta = nav_data.get('chart', {}).get('result', [{}])[0].get('meta', {})
-                    nav_price = meta.get('navPrice')
-                    if nav_price:
-                        net_value = float(nav_price)
-                except:
-                    pass
+        # 偵測是否為 ETF
+        is_etf = market == "TW" and symbol_input.startswith('0')
 
         st.session_state.current_price = current_price
         st.session_state.historical_high = historical_high
         st.session_state.success_symbol = success_symbol
         st.session_state.is_etf = is_etf
-        st.session_state.net_value = net_value
         st.rerun()
     else:
         st.error(f"無法獲取「{stock_symbol}」的股票資料")
