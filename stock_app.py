@@ -3,6 +3,11 @@ import yfinance as yf
 from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
+import time
+import random
+
+# 設置 HTTP Headers 來減少被封鎖
+http_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
 st.set_page_config(page_title="股票價格分析工具", page_icon="📈", layout="wide")
 
@@ -24,7 +29,14 @@ with col_btn:
     st.write("")
     search_btn = st.button("🔍 查詢", type="primary", use_container_width=True)
 
-if search_btn and stock_symbol:
+# 使用 session state 追蹤是否已查詢
+if 'searched' not in st.session_state:
+    st.session_state.searched = False
+
+if search_btn:
+    st.session_state.searched = True
+
+if st.session_state.searched and stock_symbol:
     try:
         if market == "TW":
             # 台股代碼處理
@@ -45,9 +57,20 @@ if search_btn and stock_symbol:
         error_msg = ""
         for sym in symbols_to_try:
             try:
+                # 隨機延遲避免被限流
+                time.sleep(random.uniform(0.5, 1.5))
+
                 stock = yf.Ticker(sym)
+                # 設定代理或使用更保守的請求
                 stock_info = stock.info
-                current_price = stock_info.get('currentPrice') or stock_info.get('regularMarketPrice')
+
+                if not stock_info:
+                    # 如果 info 為空，嘗試從歷史資料獲取
+                    hist = stock.history(period="5d")
+                    if not hist.empty:
+                        current_price = float(hist['Close'].iloc[-1])
+                else:
+                    current_price = stock_info.get('currentPrice') or stock_info.get('regularMarketPrice')
 
                 if current_price is None:
                     hist = stock.history(period="5d")
@@ -67,10 +90,14 @@ if search_btn and stock_symbol:
                 continue
 
         if current_price is None:
+            st.session_state.searched = False  # 重置搜尋狀態
             st.error(f"無法獲取「{stock_symbol}」的股票資料")
             if error_msg:
                 st.error(f"錯誤原因: {error_msg}")
-            st.info("提示：請確認股票代號正確，如 2330、AAPL、MSFT 等")
+            if "rate limited" in error_msg.lower() or "too many requests" in error_msg.lower():
+                st.warning("⏳ Yahoo Finance 伺服器忙碌中，請稍等 30 秒後再試")
+            else:
+                st.info("提示：請確認股票代號正確，如 2330、AAPL、MSFT 等")
         else:
             # 判斷基準價
             if historical_high > current_price:
@@ -99,8 +126,7 @@ if search_btn and stock_symbol:
             if market == "TW" and not net_value:
                 try:
                     url = f"https://www.wantgoo.com/stock/{stock_symbol}"
-                    headers = {'User-Agent': 'Mozilla/5.0'}
-                    resp = requests.get(url, headers=headers, timeout=5)
+                    resp = requests.get(url, headers=http_headers, timeout=5)
                     if resp.status_code == 200:
                         soup = BeautifulSoup(resp.text, 'html.parser')
                         nav_elem = soup.find(string='每股淨值')
@@ -116,6 +142,7 @@ if search_btn and stock_symbol:
                     pass
 
             # ===== 顯示查詢結果 =====
+            st.session_state.searched = False  # 重置搜尋狀態
             st.success(f"✅ 查詢成功: {success_symbol}" + (" (ETF)" if is_etf else ""))
 
             col1, col2, col3, col4 = st.columns(4)
