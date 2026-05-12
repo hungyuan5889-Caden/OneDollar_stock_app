@@ -113,26 +113,23 @@ if search_btn:
         if historical_high is None:
             historical_high = current_price
 
-        # 偵測是否為 ETF
+        # 偵測是否為 ETF，從 Yahoo meta 取得 NAV
         is_etf = False
         net_value = None
-        if market == "TW":
-            # 台股 ETF 代碼開頭通常是 00 或 0
-            if symbol_input.startswith('0'):
-                is_etf = True
-                # 嘗試從 Yahoo 獲取 ETF 淨值
-                nav_url = f"https://www.twse.com.tw/rwd/zh/fund/T86?date=&stockNo={symbol_input}&response=json"
-                nav_resp = requests.get(nav_url, headers=http_headers, timeout=10, verify=False)
-                if nav_resp.status_code == 200:
-                    try:
-                        nav_data = nav_resp.json()
-                        if nav_data.get('data') and nav_data['data'][0]:
-                            nav = nav_data['data'][0]
-                            nav_str = nav[3] if nav[3] != '--' else None
-                            if nav_str:
-                                net_value = float(nav_str.replace(',', ''))
-                    except:
-                        pass
+        if market == "TW" and symbol_input.startswith('0'):
+            is_etf = True
+            # 從 Yahoo Finance v8 API 的 meta 欄位取得 navPrice
+            nav_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{success_symbol}"
+            nav_resp = requests.get(nav_url, headers=http_headers, timeout=10, verify=False)
+            if nav_resp.status_code == 200:
+                try:
+                    nav_data = nav_resp.json()
+                    meta = nav_data.get('chart', {}).get('result', [{}])[0].get('meta', {})
+                    nav_price = meta.get('navPrice')
+                    if nav_price:
+                        net_value = float(nav_price)
+                except:
+                    pass
 
         st.session_state.current_price = current_price
         st.session_state.historical_high = historical_high
