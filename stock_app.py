@@ -24,12 +24,18 @@ with col_btn:
     st.write("")
     search_btn = st.button("🔍 查詢", type="primary", use_container_width=True)
 
-if search_btn or stock_symbol:
+if search_btn and stock_symbol:
     try:
         if market == "TW":
-            symbols_to_try = [f"{stock_symbol}.TW", f"{stock_symbol}.TWO"]
+            # 台股代碼處理
+            symbol_input = stock_symbol.strip()
+            # 如果已經有 .TW 就不要重複加
+            if not symbol_input.endswith((".TW", ".TWO")):
+                symbols_to_try = [f"{symbol_input}.TW", f"{symbol_input}.TWO"]
+            else:
+                symbols_to_try = [symbol_input]
         else:
-            symbols_to_try = [stock_symbol.upper()]
+            symbols_to_try = [stock_symbol.strip().upper()]
 
         current_price = None
         historical_high = None
