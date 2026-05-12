@@ -1,21 +1,22 @@
 import streamlit as st
 import yfinance as yf
-import twstock
 from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
-import time
-import random
+import re
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# 設置 HTTP Headers 來減少被封鎖
-http_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+# 設置 HTTP Headers
+http_headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Accept': 'application/json, text/plain, */*',
+}
 
 st.set_page_config(page_title="股票價格分析工具", page_icon="📈", layout="wide")
 
 st.title("📈 股票價格分析工具")
-st.caption("版本: V02 (Streamlit Web版)")
+st.caption("版本: V03 (Streamlit Web版)")
 
 # ===== 1. 股票數據查詢 =====
 st.header("1. 股票數據查詢")
@@ -40,93 +41,102 @@ if search_btn:
     st.session_state.searched = True
 
 if st.session_state.searched and stock_symbol:
-    try:
-        if market == "TW":
-            # 台股代碼處理
-            symbol_input = stock_symbol.strip()
-            # 如果已經有 .TW 就不要重複加
-            if not symbol_input.endswith((".TW", ".TWO")):
-                symbols_to_try = [f"{symbol_input}.TW", f"{symbol_input}.TWO"]
-            else:
-                symbols_to_try = [symbol_input]
-        else:
-            symbols_to_try = [stock_symbol.strip().upper()]
+    symbol_input = stock_symbol.strip()
 
+    try:
         current_price = None
         historical_high = None
         success_symbol = None
-        stock_info = None
 
-        error_msg = ""
-
-        # 優先使用 twstock 獲取台股數據
+        # ===== 台股：使用台灣經濟日報 API =====
         if market == "TW":
+            if not symbol_input.endswith((".TW", ".TWO")):
+                query_symbol = symbol_input
+            else:
+                query_symbol = symbol_input
+
             try:
-                now = datetime.now()
-                stock_tw = twstock.Stock(symbol_input)
-                # 抓今年全年的資料
-                stock_tw.fetch(now.year, '12')
-                if stock_tw.data:
-                    latest = stock_tw.data[-1]
-                    current_price = float(latest.close)
-                    historical_high = float(max([d.high for d in stock_tw.data]))
-                else:
-                    current_price = None
-                success_symbol = f"{symbol_input}.TW"
+                # 使用 Yahoo Finance API (透過 requests 直接呼叫，繞過 yfinance 限制)
+                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{query_symbol}.TW"
+                payload = {
+                    'interval': '1d',
+                    'range': '1y',
+                }
+                resp = requests.get(url, headers=http_headers, params=payload, timeout=10, verify=False)
+
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if 'chart' in data and data['chart'].get('result'):
+                        result = data['chart']['result'][0]
+                        meta = result.get('meta', {})
+                        timestamps = result.get('timestamp', [])
+                        closes = result.get('indicators', {}).get('quote', [{}])[0].get('close', [])
+                        highs = result.get('indicators', {}).get('quote', [{}])[0].get('high', [])
+
+                        if closes:
+                            # 過濾掉 None 值
+                            valid_closes = [c for c in closes if c is not None]
+                            valid_highs = [h for h in highs if h is not None]
+
+                            if valid_closes:
+                                current_price = float(valid_closes[-1])
+
+                            if valid_highs:
+                                historical_high = float(max(valid_highs))
+                            else:
+                                historical_high = current_price
+
+                            success_symbol = f"{query_symbol}.TW"
+
             except Exception as e:
-                error_msg = str(e)
+                st.error(f"請求錯誤: {e}")
 
-        # 如果台股失敗，嘗試用 yfinance (可能會被 rate limit)
-        if not success_symbol and market == "US":
-            for sym in symbols_to_try:
-                try:
-                    # 延遲避免被限流
-                    time.sleep(2)
+        # ===== 美股 =====
+        elif market == "US":
+            if not symbol_input.endswith(".TW"):
+                us_symbol = symbol_input.upper()
+            else:
+                us_symbol = symbol_input.upper()
 
-                    stock = yf.Ticker(sym)
-                    # 設定代理或使用更保守的請求
-                    stock_info = stock.info
+            try:
+                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{us_symbol}"
+                payload = {
+                    'interval': '1d',
+                    'range': 'max',
+                }
+                resp = requests.get(url, headers=http_headers, params=payload, timeout=10, verify=False)
 
-                    if not stock_info:
-                        # 如果 info 為空，嘗試從歷史資料獲取
-                        hist = stock.history(period="5d")
-                        if not hist.empty:
-                            current_price = float(hist['Close'].iloc[-1])
-                    else:
-                        current_price = stock_info.get('currentPrice') or stock_info.get('regularMarketPrice')
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if 'chart' in data and data['chart'].get('result'):
+                        result = data['chart']['result'][0]
+                        meta = result.get('meta', {})
+                        closes = result.get('indicators', {}).get('quote', [{}])[0].get('close', [])
+                        highs = result.get('indicators', {}).get('quote', [{}])[0].get('high', [])
 
-                    if current_price is None:
-                        hist = stock.history(period="5d")
-                        if not hist.empty:
-                            current_price = float(hist['Close'].iloc[-1])
+                        valid_closes = [c for c in closes if c is not None]
+                        valid_highs = [h for h in highs if h is not None]
 
-                    if current_price is not None:
-                        hist_data = stock.history(period="max")
-                        if not hist_data.empty:
-                            historical_high = float(hist_data['High'].max())
+                        if valid_closes:
+                            current_price = float(valid_closes[-1])
+
+                        if valid_highs:
+                            historical_high = float(max(valid_highs))
                         else:
                             historical_high = current_price
-                        success_symbol = sym
-                        break
-                except Exception as e:
-                    error_msg = str(e)
-                    continue
 
-        # 確保有歷史最高價
-        if historical_high is None and current_price is not None:
-            historical_high = current_price
+                        success_symbol = us_symbol
 
+            except Exception as e:
+                st.error(f"請求錯誤: {e}")
+
+        # ===== 處理結果 =====
         if current_price is None:
-            st.session_state.searched = False  # 重置搜尋狀態
+            st.session_state.searched = False
             st.error(f"無法獲取「{stock_symbol}」的股票資料")
-            if error_msg:
-                st.error(f"錯誤原因: {error_msg}")
-            if "rate limited" in error_msg.lower() or "too many requests" in error_msg.lower():
-                st.warning("⏳ Yahoo Finance 伺服器忙碌中，請稍等 30 秒後再試")
-            else:
-                st.info("提示：請確認股票代號正確，如 2330、AAPL、MSFT 等")
+            st.info("提示：請確認股票代號正確，如 2330、AAPL、MSFT 等")
         else:
-            # 確保 historical_high 有值
+            # 確保歷史最高有值
             if historical_high is None:
                 historical_high = current_price
 
@@ -139,42 +149,11 @@ if st.session_state.searched and stock_symbol:
                 base_type = "目前成交價"
 
             # 計算回撤百分比
-            if historical_high and historical_high > 0:
-                drawdown_pct = ((historical_high - current_price) / historical_high) * 100
-            else:
-                drawdown_pct = 0
-
-            # 檢查是否為ETF
-            is_etf = False
-            net_value = None
-            quote_type = stock_info.get('quoteType', '').upper() if stock_info else ''
-            type_disp = stock_info.get('typeDisp', '').upper() if stock_info else ''
-            if stock_info:
-                is_etf = quote_type == 'ETF' or 'ETF' in type_disp
-                net_value = stock_info.get('navPrice')
-
-            # 如果是台股ETF但沒有navPrice，嘗試從wantgoo獲取
-            if market == "TW" and not net_value:
-                try:
-                    url = f"https://www.wantgoo.com/stock/{stock_symbol}"
-                    resp = requests.get(url, headers=http_headers, timeout=5, verify=False)
-                    if resp.status_code == 200:
-                        soup = BeautifulSoup(resp.text, 'html.parser')
-                        nav_elem = soup.find(string='每股淨值')
-                        if nav_elem:
-                            parent = nav_elem.find_parent('div')
-                            if parent:
-                                nav_text = parent.get_text(strip=True)
-                                import re
-                                match = re.search(r'[\d.]+', nav_text)
-                                if match:
-                                    net_value = float(match.group())
-                except:
-                    pass
+            drawdown_pct = ((historical_high - current_price) / historical_high) * 100
 
             # ===== 顯示查詢結果 =====
-            st.session_state.searched = False  # 重置搜尋狀態
-            st.success(f"✅ 查詢成功: {success_symbol}" + (" (ETF)" if is_etf else ""))
+            st.session_state.searched = False
+            st.success(f"✅ 查詢成功: {success_symbol}")
 
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -186,30 +165,19 @@ if st.session_state.searched and stock_symbol:
             with col4:
                 st.metric("基準價 (P_base)", f"${p_base:,.2f}", delta=base_type)
 
-            if net_value:
-                st.metric("ETF每股淨值", f"${net_value:,.2f}")
-            elif is_etf:
-                st.info("ETF 資訊：無淨值數據")
-
             # ===== 2. 自定義回撤計算 =====
             st.divider()
             st.header("2. 自定義回撤計算")
 
-            col_pct, col_result = st.columns([2, 2])
-
-            with col_pct:
-                drawdown_pct_input = st.slider("選擇回撤百分比", min_value=1, max_value=99, value=20)
-
-            with col_result:
-                drawdown_price = p_base * (1 - drawdown_pct_input / 100)
-                st.metric("對應價格", f"${drawdown_price:,.2f}", delta=f"回撤 {drawdown_pct_input}%")
+            drawdown_pct_input = st.slider("選擇回撤百分比", min_value=1, max_value=99, value=20)
+            drawdown_price = p_base * (1 - drawdown_pct_input / 100)
+            st.metric("對應價格", f"${drawdown_price:,.2f}", delta=f"回撤 {drawdown_pct_input}%")
 
             # ===== 3. 回撤加碼區間 =====
             st.divider()
             st.header("3. 回撤加碼區間 (90% - 10%)")
 
             percentages = [90, 80, 70, 60, 50, 40, 30, 20, 10]
-
             cols = st.columns(9)
             for i, pct in enumerate(percentages):
                 price = p_base * (pct / 100)
@@ -234,17 +202,17 @@ if st.session_state.searched and stock_symbol:
 
             with col_result:
                 n = st.selectbox("選擇除數 N", list(range(1, 10)), index=0)
-                result = x_value / n
-                st.metric(f"Y = X ÷ {n}", f"${result:,.2f}")
+                result_val = x_value / n
+                st.metric(f"Y = X ÷ {n}", f"${result_val:,.2f}")
 
-            st.caption(f"公式：Y = {x_value:,} ÷ {n} = ${result:,.2f}")
+            st.caption(f"公式：Y = {x_value:,} ÷ {n} = ${result_val:,.2f}")
 
     except Exception as e:
+        st.session_state.searched = False
         st.error(f"查詢失敗: {str(e)}")
-        st.info("提示：請確認股票代號正確，如 2330、AAPL、MSFT 等")
 
 else:
     st.info("👆 請輸入股票代號並點擊查詢")
 
 st.divider()
-st.caption("📊 數據來源：Yahoo Finance | 使用 yfinance 獲取即時報價")
+st.caption("📊 數據來源：Yahoo Finance API")
