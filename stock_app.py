@@ -62,8 +62,10 @@ if st.session_state.searched and stock_symbol:
         # 優先使用 twstock 獲取台股數據
         if market == "TW":
             try:
+                now = datetime.now()
                 stock_tw = twstock.Stock(symbol_input)
-                stock_tw.fetch()
+                # 抓今年全年的資料
+                stock_tw.fetch(now.year, '12')
                 if stock_tw.data:
                     latest = stock_tw.data[-1]
                     current_price = float(latest.close)
