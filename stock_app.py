@@ -42,6 +42,7 @@ if search_btn and stock_symbol:
         success_symbol = None
         stock_info = None
 
+        error_msg = ""
         for sym in symbols_to_try:
             try:
                 stock = yf.Ticker(sym)
@@ -61,11 +62,15 @@ if search_btn and stock_symbol:
                         historical_high = current_price
                     success_symbol = sym
                     break
-            except Exception:
+            except Exception as e:
+                error_msg = str(e)
                 continue
 
         if current_price is None:
-            st.error(f"無法獲取「{stock_symbol}」的股票資料，請檢查代號是否正確")
+            st.error(f"無法獲取「{stock_symbol}」的股票資料")
+            if error_msg:
+                st.error(f"錯誤原因: {error_msg}")
+            st.info("提示：請確認股票代號正確，如 2330、AAPL、MSFT 等")
         else:
             # 判斷基準價
             if historical_high > current_price:
