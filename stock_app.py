@@ -23,8 +23,6 @@ if 'success_symbol' not in st.session_state:
     st.session_state.success_symbol = None
 if 'is_etf' not in st.session_state:
     st.session_state.is_etf = False
-if 'net_value' not in st.session_state:
-    st.session_state.net_value = None
 
 # ===== 1. 股票數據查詢 =====
 st.header("1. 股票數據查詢")
@@ -80,21 +78,6 @@ if search_btn:
                             success_symbol = test_sym
                             break
 
-        # ETF 淨值：從 Yahoo Finance QuoteSummary API 獲取
-        if market == "TW" and success_symbol and symbol_input.startswith('0'):
-            quote_url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{success_symbol}"
-            quote_params = {
-                'modules': 'price',
-                'corsDomain': 'finance.yahoo.com'
-            }
-            quote_resp = requests.get(quote_url, headers=http_headers, params=quote_params, timeout=10, verify=False)
-            if quote_resp.status_code == 200:
-                quote_data = quote_resp.json()
-                price = quote_data.get('quoteSummary', {}).get('result', [{}])[0].get('price', {})
-                if price.get('navPrice', {}).get('raw'):
-                    st.session_state.net_value = float(price['navPrice']['raw'])
-
-
         # ===== 美股 =====
         elif market == "US":
             us_symbol = symbol_input.upper()
@@ -146,7 +129,6 @@ if st.session_state.current_price is not None:
     historical_high = st.session_state.historical_high
     success_symbol = st.session_state.success_symbol
     is_etf = st.session_state.is_etf
-    net_value = st.session_state.net_value
 
     # 判斷基準價
     if historical_high > current_price:
@@ -170,12 +152,6 @@ if st.session_state.current_price is not None:
         st.metric("距歷史最高點回撤", f"{drawdown_pct:.2f}%", delta_color="inverse")
     with col4:
         st.metric("基準價 (P_base)", f"${p_base:,.2f}", delta=base_type)
-
-    if is_etf:
-        if net_value:
-            st.metric("ETF 每股淨值", f"${net_value:,.2f}")
-        else:
-            st.info("ETF 資訊：無淨值數據")
 
     # ===== 2. 自定義回撤計算 =====
     st.divider()
