@@ -76,9 +76,15 @@ class TaiwanETFDataFetcher:
         if all_etf.empty:
             return None, None, None
 
-        # 去除 .TW 或 .TWO 後綴
-        clean_symbol = symbol.replace(".TW", "").replace(".TWO", "")
-        result = all_etf[all_etf['證券代號'] == clean_symbol]
+        # 去除 .TW 或 .TWO 後綴，並去除空白
+        clean_symbol = symbol.replace(".TW", "").replace(".TWO", "").strip()
+
+        # 除錯：顯示即將比對的代號
+        print(f"[DEBUG] 查詢代號: '{clean_symbol}'")
+        print(f"[DEBUG] 資料庫代號範例: {all_etf['證券代號'].head(5).tolist()}")
+
+        # 精確比對（去除空白）
+        result = all_etf[all_etf['證券代號'].str.strip() == clean_symbol]
 
         if result.empty:
             return None, None, None
@@ -89,12 +95,12 @@ class TaiwanETFDataFetcher:
 
         # 嘗試轉換為浮點數
         try:
-            nav = float(nav.replace(",", ""))
+            nav = float(str(nav).replace(",", ""))
         except:
             nav = None
 
         try:
-            premium = float(premium.replace(",", ""))
+            premium = float(str(premium).replace(",", ""))
         except:
             premium = None
 
@@ -261,7 +267,7 @@ if search_btn:
         source = ""
 
         if is_etf and success_symbol:
-            clean_symbol = success_symbol.replace(".TW", "").replace(".TWO", "")
+            clean_symbol = success_symbol.replace(".TW", "").replace(".TWO", "").strip()
 
             # 先嘗試從網路抓取（優先最新資料）
             try:
@@ -269,6 +275,8 @@ if search_btn:
                 net_value, premium, nav_update_time = fetcher.get_etf_nav(success_symbol)
                 if net_value is not None:
                     source = "證交所"
+                else:
+                    debug_msg = f"網路抓取成功但找不到 {clean_symbol}"
             except Exception as e:
                 debug_msg = f"請求失敗: {e}"
 
