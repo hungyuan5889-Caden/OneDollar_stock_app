@@ -187,6 +187,7 @@ if search_btn:
     current_price = None
     historical_high = None
     success_symbol = None
+    etf_info = None  # 儲存 ETF 資訊
 
     try:
         # ===== 台股 =====
@@ -197,6 +198,7 @@ if search_btn:
                 symbols_to_try = [f"{symbol_input}.TW", f"{symbol_input}.TWO"]
 
             for test_sym in symbols_to_try:
+                # 抓取價格
                 url = f"https://query1.finance.yahoo.com/v8/finance/chart/{test_sym}"
                 payload = {'interval': '1d', 'range': '1y'}
                 resp = requests.get(url, headers=http_headers, params=payload, timeout=10, verify=False)
@@ -205,7 +207,6 @@ if search_btn:
                     data = resp.json()
                     if 'chart' in data and data['chart'].get('result'):
                         result = data['chart']['result'][0]
-                        meta = result.get('meta', {})
                         closes = result.get('indicators', {}).get('quote', [{}])[0].get('close', [])
                         highs = result.get('indicators', {}).get('quote', [{}])[0].get('high', [])
 
@@ -218,6 +219,18 @@ if search_btn:
                             historical_high = float(max(valid_highs))
                         if current_price:
                             success_symbol = test_sym
+
+                            # 嘗試抓取 ETF 資訊 (navPrice)
+                            try:
+                                info_url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{test_sym}?modules=price"
+                                info_resp = requests.get(info_url, headers=http_headers, timeout=5, verify=False)
+                                if info_resp.status_code == 200:
+                                    info_data = info_resp.json()
+                                    if info_data.get('quoteSummary', {}).get('result'):
+                                        etf_info = info_data['quoteSummary']['result'][0].get('price', {})
+                            except:
+                                pass
+
                             break
 
         # ===== 美股 =====
@@ -244,6 +257,17 @@ if search_btn:
                     if current_price:
                         success_symbol = us_symbol
 
+                        # 嘗試抓取 ETF 資訊
+                        try:
+                            info_url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{us_symbol}?modules=price"
+                            info_resp = requests.get(info_url, headers=http_headers, timeout=5, verify=False)
+                            if info_resp.status_code == 200:
+                                info_data = info_resp.json()
+                                if info_data.get('quoteSummary', {}).get('result'):
+                                    etf_info = info_data['quoteSummary']['result'][0].get('price', {})
+                        except:
+                            pass
+
     except Exception as e:
         st.error(f"請求錯誤: {e}")
         st.stop()
@@ -266,24 +290,33 @@ if search_btn:
         if is_etf and success_symbol:
             clean_symbol = success_symbol.replace(".TW", "").replace(".TWO", "").strip()
 
-            # 先嘗試從網路抓取（優先最新資料）
-            try:
-                fetcher = TaiwanETFDataFetcher()
-                tw_df = fetcher.fetch_twse_nav()
-                two_df = fetcher.fetch_tpex_nav()
-                debug_msg = f"上市: {len(tw_df)} 筆, 上櫃: {len(two_df)} 筆"
-                if not tw_df.empty:
-                    debug_msg += f", fields: {tw_df.columns.tolist()}"
-                if not tw_df.empty:
-                    debug_msg += f", sample: {tw_df['證券代號'].head(3).tolist()}"
-                all_etf = pd.concat([tw_df, two_df], ignore_index=True)
-                net_value, premium, nav_update_time = fetcher.get_etf_nav(success_symbol)
-                if net_value is not None:
-                    source = "證交所"
-            except Exception as e:
-                debug_msg = f"請求失敗: {e}"
+            # 方法1: 嘗試從 Yahoo Finance 抓取 navPrice
+            if etf_info:
+                nav_price = etf_info.get('navPrice')
+                if nav_price:
+                    net_value = float(nav_price)
+                    premium = None
+                    nav_update_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    source = "Yahoo Finance"
+                    debug_msg = f"從 Yahoo 取得 navPrice: {nav_price}"
 
-            # 網路抓取失敗，才使用備用資料庫
+            # 方法2: 嘗試從台灣證交所抓取
+            if net_value is None:
+                try:
+                    fetcher = TaiwanETFDataFetcher()
+                    tw_df = fetcher.fetch_twse_nav()
+                    two_df = fetcher.fetch_tpex_nav()
+                    if len(tw_df) > 0 or len(two_df) > 0:
+                        all_etf = pd.concat([tw_df, two_df], ignore_index=True)
+                        net_value, premium, nav_update_time = fetcher.get_etf_nav(success_symbol)
+                        if net_value is not None:
+                            source = "證交所"
+                    else:
+                        debug_msg = "證交所抓取失敗"
+                except Exception as e:
+                    debug_msg = f"證交所請求失敗: {e}"
+
+            # 方法3: 使用備用資料庫
             if net_value is None:
                 if clean_symbol in ETF_NAV_FALLBACK:
                     fallback = ETF_NAV_FALLBACK[clean_symbol]
@@ -292,7 +325,7 @@ if search_btn:
                     nav_update_time = fallback["update"]
                     source = "備用資料庫"
                 else:
-                    debug_msg = "抓取失敗且無備用資料"
+                    debug_msg = "無備用資料"
 
         st.session_state.current_price = current_price
         st.session_state.historical_high = historical_high
