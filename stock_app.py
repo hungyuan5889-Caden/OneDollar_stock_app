@@ -139,6 +139,8 @@ ETF_NAV_FALLBACK = {
     "00892": {"nav": 16.20, "premium": -0.02, "update": "2025-05-14"},
     "009808": {"nav": 18.45, "premium": -0.10, "update": "2025-05-14"},
     "009819": {"nav": 15.80, "premium": -0.05, "update": "2025-05-14"},
+    "00662": {"nav": 22.50, "premium": -0.12, "update": "2025-05-14"},
+    "009816": {"nav": 18.20, "premium": -0.08, "update": "2025-05-14"},
 }
 
 # ===== 初始化 session state =====
@@ -259,25 +261,27 @@ if search_btn:
         source = ""
 
         if is_etf and success_symbol:
-            # 先檢查備用資料庫
             clean_symbol = success_symbol.replace(".TW", "").replace(".TWO", "")
-            if clean_symbol in ETF_NAV_FALLBACK:
-                fallback = ETF_NAV_FALLBACK[clean_symbol]
-                net_value = fallback["nav"]
-                premium = fallback["premium"]
-                nav_update_time = fallback["update"]
-                source = "備用資料庫"
-            else:
-                # 備用沒有再嘗試從網路抓取
-                try:
-                    fetcher = TaiwanETFDataFetcher()
-                    net_value, premium, nav_update_time = fetcher.get_etf_nav(success_symbol)
-                    if net_value is not None:
-                        source = "證交所"
-                    else:
-                        debug_msg = "無資料"
-                except Exception as e:
-                    debug_msg = f"請求失敗: {e}"
+
+            # 先嘗試從網路抓取（優先最新資料）
+            try:
+                fetcher = TaiwanETFDataFetcher()
+                net_value, premium, nav_update_time = fetcher.get_etf_nav(success_symbol)
+                if net_value is not None:
+                    source = "證交所"
+            except Exception as e:
+                debug_msg = f"請求失敗: {e}"
+
+            # 網路抓取失敗，才使用備用資料庫
+            if net_value is None:
+                if clean_symbol in ETF_NAV_FALLBACK:
+                    fallback = ETF_NAV_FALLBACK[clean_symbol]
+                    net_value = fallback["nav"]
+                    premium = fallback["premium"]
+                    nav_update_time = fallback["update"]
+                    source = "備用資料庫"
+                else:
+                    debug_msg = "抓取失敗且無備用資料"
 
         st.session_state.current_price = current_price
         st.session_state.historical_high = historical_high
