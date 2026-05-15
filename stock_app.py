@@ -23,14 +23,14 @@ class TaiwanETFDataFetcher:
         if referer:
             headers["Referer"] = referer
 
-        for i in range(3):
+        for i in range(2):  # 最多重試 2 次
             try:
-                time.sleep(random.uniform(2, 5))
-                response = self.session.get(url, params=params, headers=headers, timeout=10)
+                time.sleep(random.uniform(0.5, 1.5))  # 減少延遲
+                response = self.session.get(url, params=params, headers=headers, timeout=5)  # 減少超時
                 response.raise_for_status()
                 return response.json()
             except Exception as e:
-                if i == 2:
+                if i == 1:
                     return None
         return None
 
@@ -259,26 +259,25 @@ if search_btn:
         source = ""
 
         if is_etf and success_symbol:
-            # 先嘗試從網路抓取
-            try:
-                fetcher = TaiwanETFDataFetcher()
-                net_value, premium, nav_update_time = fetcher.get_etf_nav(success_symbol)
-                if net_value is not None:
-                    source = "證交所"
-            except Exception as e:
-                debug_msg = f"請求失敗: {e}"
-
-            # 如果抓取失敗，使用備用資料庫
-            if net_value is None:
-                clean_symbol = success_symbol.replace(".TW", "").replace(".TWO", "")
-                if clean_symbol in ETF_NAV_FALLBACK:
-                    fallback = ETF_NAV_FALLBACK[clean_symbol]
-                    net_value = fallback["nav"]
-                    premium = fallback["premium"]
-                    nav_update_time = fallback["update"]
-                    source = "備用資料庫"
-                else:
-                    debug_msg = "抓取失敗且無備用資料"
+            # 先檢查備用資料庫
+            clean_symbol = success_symbol.replace(".TW", "").replace(".TWO", "")
+            if clean_symbol in ETF_NAV_FALLBACK:
+                fallback = ETF_NAV_FALLBACK[clean_symbol]
+                net_value = fallback["nav"]
+                premium = fallback["premium"]
+                nav_update_time = fallback["update"]
+                source = "備用資料庫"
+            else:
+                # 備用沒有再嘗試從網路抓取
+                try:
+                    fetcher = TaiwanETFDataFetcher()
+                    net_value, premium, nav_update_time = fetcher.get_etf_nav(success_symbol)
+                    if net_value is not None:
+                        source = "證交所"
+                    else:
+                        debug_msg = "無資料"
+                except Exception as e:
+                    debug_msg = f"請求失敗: {e}"
 
         st.session_state.current_price = current_price
         st.session_state.historical_high = historical_high
