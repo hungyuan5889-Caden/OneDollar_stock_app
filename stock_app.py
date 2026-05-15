@@ -1,7 +1,104 @@
 import streamlit as st
 import requests
 import urllib3
+import pandas as pd
+import time
+import random
+from datetime import datetime
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+class TaiwanETFDataFetcher:
+    def __init__(self):
+        self.session = requests.Session()
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+        }
+
+    def _get_with_retry(self, url, params=None, referer=None):
+        headers = self.headers.copy()
+        if referer:
+            headers["Referer"] = referer
+
+        for i in range(3):
+            try:
+                time.sleep(random.uniform(2, 5))
+                response = self.session.get(url, params=params, headers=headers, timeout=10)
+                response.raise_for_status()
+                return response.json()
+            except Exception as e:
+                if i == 2:
+                    return None
+        return None
+
+    def fetch_twse_nav(self):
+        """獲取上市 (.TW) ETF 淨值數據"""
+        url = "https://www.twse.com.tw/exchangeReport/ETF_NET_QUOTE"
+        params = {"response": "json", "_": int(time.time() * 1000)}
+        referer = "https://www.twse.com.tw/zh/page/etf/etf_nav.html"
+
+        data = self._get_with_retry(url, params, referer)
+        if not data or "data" not in data:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(data["data"], columns=data["fields"])
+        df = df[['證券代號', '證券簡稱', '最近淨值', '預估折溢價(%)']]
+        return df
+
+    def fetch_tpex_nav(self):
+        """獲取上櫃 (.TWO) ETF 淨值數據"""
+        url = "https://www.tpex.org.tw/web/stock/etf/nav/nav_result.php"
+        params = {"l": "zh-tw", "_": int(time.time() * 1000)}
+        referer = "https://www.tpex.org.tw/web/stock/etf/nav/nav.php"
+
+        data = self._get_with_retry(url, params, referer)
+        if not data or "aaData" not in data:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(data["aaData"])
+        df = df[[0, 1, 3, 5]]
+        df.columns = ['證券代號', '證券簡稱', '最近淨值', '預估折溢價(%)']
+        return df
+
+    def fetch_all_etf_nav(self):
+        """獲取所有台灣 ETF 淨值"""
+        tw_df = self.fetch_twse_nav()
+        two_df = self.fetch_tpex_nav()
+        all_etf = pd.concat([tw_df, two_df], ignore_index=True)
+        return all_etf
+
+    def get_etf_nav(self, symbol):
+        """查詢特定 ETF 的淨值"""
+        all_etf = self.fetch_all_etf_nav()
+        if all_etf.empty:
+            return None, None, None
+
+        # 去除 .TW 或 .TWO 後綴
+        clean_symbol = symbol.replace(".TW", "").replace(".TWO", "")
+        result = all_etf[all_etf['證券代號'] == clean_symbol]
+
+        if result.empty:
+            return None, None, None
+
+        row = result.iloc[0]
+        nav = row['最近淨值']
+        premium = row['預估折溢價(%)']
+
+        # 嘗試轉換為浮點數
+        try:
+            nav = float(nav.replace(",", ""))
+        except:
+            nav = None
+
+        try:
+            premium = float(premium.replace(",", ""))
+        except:
+            premium = None
+
+        return nav, premium, datetime.now().strftime("%Y-%m-%d %H:%M")
 
 # 設置 HTTP Headers
 http_headers = {
@@ -23,6 +120,12 @@ if 'success_symbol' not in st.session_state:
     st.session_state.success_symbol = None
 if 'is_etf' not in st.session_state:
     st.session_state.is_etf = False
+if 'net_value' not in st.session_state:
+    st.session_state.net_value = None
+if 'premium' not in st.session_state:
+    st.session_state.premium = None
+if 'nav_update_time' not in st.session_state:
+    st.session_state.nav_update_time = None
 
 # ===== 1. 股票數據查詢 =====
 st.header("1. 股票數據查詢")
@@ -111,13 +214,27 @@ if search_btn:
         if historical_high is None:
             historical_high = current_price
 
-        # 偵測是否為 ETF
-        is_etf = market == "TW" and symbol_input.startswith('0')
+        # 偵測是否為 ETF (台股以 0 開頭且代號為 6 位數通常是 ETF)
+        is_etf = market == "TW" and symbol_input.startswith('0') and len(symbol_input) == 6
+
+        # 如果是 ETF，抓取淨值
+        net_value = None
+        premium = None
+        nav_update_time = None
+        if is_etf and success_symbol:
+            try:
+                fetcher = TaiwanETFDataFetcher()
+                net_value, premium, nav_update_time = fetcher.get_etf_nav(success_symbol)
+            except Exception as e:
+                st.warning(f"無法獲取 ETF 淨值: {e}")
 
         st.session_state.current_price = current_price
         st.session_state.historical_high = historical_high
         st.session_state.success_symbol = success_symbol
         st.session_state.is_etf = is_etf
+        st.session_state.net_value = net_value
+        st.session_state.premium = premium
+        st.session_state.nav_update_time = nav_update_time
         st.rerun()
     else:
         st.error(f"無法獲取「{stock_symbol}」的股票資料")
@@ -152,6 +269,17 @@ if st.session_state.current_price is not None:
         st.metric("距歷史最高點回撤", f"{drawdown_pct:.2f}%", delta_color="inverse")
     with col4:
         st.metric("基準價 (P_base)", f"${p_base:,.2f}", delta=base_type)
+
+    # ===== ETF 淨值顯示 =====
+    if is_etf and st.session_state.net_value is not None:
+        st.divider()
+        col_nav1, col_nav2, col_nav3 = st.columns(3)
+        with col_nav1:
+            st.metric("ETF每股淨值", f"${st.session_state.net_value:,.2f}")
+        with col_nav2:
+            st.metric("預估折溢價", f"{st.session_state.premium:.2f}%", delta_color="inverse" if st.session_state.premium > 0 else "normal")
+        with col_nav3:
+            st.metric("更新時間", st.session_state.nav_update_time or "--")
 
     # ===== 2. 自定義回撤計算 =====
     st.divider()
