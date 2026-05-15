@@ -269,8 +269,14 @@ if search_btn:
             # 先嘗試從網路抓取（優先最新資料）
             try:
                 fetcher = TaiwanETFDataFetcher()
-                all_etf = fetcher.fetch_all_etf_nav()
-                debug_msg = f"抓取到 {len(all_etf)} 筆ETF資料，代號範例: {all_etf['證券代號'].head(5).tolist()}"
+                tw_df = fetcher.fetch_twse_nav()
+                two_df = fetcher.fetch_tpex_nav()
+                debug_msg = f"上市: {len(tw_df)} 筆, 上櫃: {len(two_df)} 筆"
+                if not tw_df.empty:
+                    debug_msg += f", fields: {tw_df.columns.tolist()}"
+                if not tw_df.empty:
+                    debug_msg += f", sample: {tw_df['證券代號'].head(3).tolist()}"
+                all_etf = pd.concat([tw_df, two_df], ignore_index=True)
                 net_value, premium, nav_update_time = fetcher.get_etf_nav(success_symbol)
                 if net_value is not None:
                     source = "證交所"
