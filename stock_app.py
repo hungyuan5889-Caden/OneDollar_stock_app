@@ -271,15 +271,18 @@ if st.session_state.current_price is not None:
         st.metric("基準價 (P_base)", f"${p_base:,.2f}", delta=base_type)
 
     # ===== ETF 淨值顯示 =====
-    if is_etf and st.session_state.net_value is not None:
+    if is_etf:
         st.divider()
-        col_nav1, col_nav2, col_nav3 = st.columns(3)
-        with col_nav1:
-            st.metric("ETF每股淨值", f"${st.session_state.net_value:,.2f}")
-        with col_nav2:
-            st.metric("預估折溢價", f"{st.session_state.premium:.2f}%", delta_color="inverse" if st.session_state.premium > 0 else "normal")
-        with col_nav3:
-            st.metric("更新時間", st.session_state.nav_update_time or "--")
+        if st.session_state.net_value is not None:
+            col_nav1, col_nav2, col_nav3 = st.columns(3)
+            with col_nav1:
+                st.metric("ETF每股淨值", f"${st.session_state.net_value:,.2f}")
+            with col_nav2:
+                st.metric("預估折溢價", f"{st.session_state.premium:.2f}%", delta_color="inverse" if st.session_state.premium > 0 else "normal")
+            with col_nav3:
+                st.metric("更新時間", st.session_state.nav_update_time or "--")
+        else:
+            st.warning(f"⚠️ 無法獲取 ETF 淨值 (is_etf={is_etf}, symbol={success_symbol})")
 
     # ===== 2. 自定義回撤計算 =====
     st.divider()
