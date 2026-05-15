@@ -79,10 +79,7 @@ class TaiwanETFDataFetcher:
         # 去除 .TW 或 .TWO 後綴，並去除空白
         clean_symbol = symbol.replace(".TW", "").replace(".TWO", "").strip()
 
-        # 除錯：顯示即將比對的代號
-        print(f"[DEBUG] 查詢代號: '{clean_symbol}'")
-        print(f"[DEBUG] 資料庫代號範例: {all_etf['證券代號'].head(5).tolist()}")
-
+        
         # 精確比對（去除空白）
         result = all_etf[all_etf['證券代號'].str.strip() == clean_symbol]
 
@@ -272,11 +269,11 @@ if search_btn:
             # 先嘗試從網路抓取（優先最新資料）
             try:
                 fetcher = TaiwanETFDataFetcher()
+                all_etf = fetcher.fetch_all_etf_nav()
+                debug_msg = f"抓取到 {len(all_etf)} 筆ETF資料，代號範例: {all_etf['證券代號'].head(5).tolist()}"
                 net_value, premium, nav_update_time = fetcher.get_etf_nav(success_symbol)
                 if net_value is not None:
                     source = "證交所"
-                else:
-                    debug_msg = f"網路抓取成功但找不到 {clean_symbol}"
             except Exception as e:
                 debug_msg = f"請求失敗: {e}"
 
@@ -348,6 +345,10 @@ if st.session_state.current_price is not None:
                 st.caption(f"更新: {st.session_state.nav_update_time or '--'} | 來源: {st.session_state.nav_source or '未知'}")
         else:
             st.warning(f"無法獲取 ETF 淨值: {st.session_state.debug_nav_msg or '未知錯誤'}")
+
+    # 除錯資訊
+    if is_etf and st.session_state.get('debug_nav_msg'):
+        st.caption(f"Debug: {st.session_state.debug_nav_msg}")
 
     # ===== 2. 自定義回撤計算 =====
     st.divider()
